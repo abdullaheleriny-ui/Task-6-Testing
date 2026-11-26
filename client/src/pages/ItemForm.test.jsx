@@ -31,7 +31,7 @@ function renderAt(path) {
 }
 
 // Reset every mock's calls and return values before each test.
-beforeEach(() => jest.clearAllMocks())
+beforeEach(() => jest.resetAllMocks())
 
 describe('ItemForm — report mode (/items/new)', () => {
   // Worked example — read it, then write the two tests below in the same style.
@@ -44,6 +44,73 @@ describe('ItemForm — report mode (/items/new)', () => {
     expect(category).toHaveValue('other')
   })
 
-  test.todo('submitting POSTs { title, status, category, location, description } (no reportedBy) and navigates to /items')
-  test.todo('shows the server\'s message when the request fails (e.g. 409) and stays on the page')
+  // Test 3: saving successfully sends the right data and opens the Items page.
+  // async lets us use await to wait for typing, clicks, and page updates.
+  test('submitting POSTs { title, status, category, location, description } (no reportedBy) and navigates to /items', async () => {
+    // Create a pretend user who can interact with the form.
+    const user = userEvent.setup()
+    // Make the fake POST request succeed; no real server is contacted.
+    api.post.mockResolvedValue({ data: { item: {} } })
+    // Display the form at the new-item route inside the test.
+    renderAt('/items/new')
+
+    // Find the title input and type into it. /title/i ignores capitalization.
+    // await waits until the pretend user has finished typing.
+    await user.type(screen.getByPlaceholderText(/title/i), 'Blue phone')
+    // Find both dropdowns: store the first as status and the second as category.
+    const [status, category] = screen.getAllByRole('combobox')
+    // Choose a non-default status to check that the selection is submitted.
+    await user.selectOptions(status, 'found')
+    // Choose the item's category from the second dropdown.
+    await user.selectOptions(category, 'electronics')
+    // Find the location input by its placeholder and enter the location.
+    await user.type(screen.getByPlaceholderText(/location/i), 'Cafeteria')
+    // Find the description field and enter details about the item.
+    await user.type(screen.getByPlaceholderText(/description/i), 'Blue case with a sticker')
+    // Find the button named Save and click it to submit the form.
+    await user.click(screen.getByRole('button', { name: /save/i }))
+
+    // Check that submitting the form sent exactly one POST request.
+    expect(api.post).toHaveBeenCalledTimes(1)
+    // Check the destination and the exact submitted object.
+    // Missing, incorrect, or extra fields (such as reportedBy) fail this check.
+    expect(api.post).toHaveBeenCalledWith('/items', {
+      title: 'Blue phone', status: 'found', category: 'electronics',
+      location: 'Cafeteria', description: 'Blue case with a sticker'
+    })
+    // Wait for the destination page's text, proving navigation succeeded.
+    expect(await screen.findByText('Items page')).toBeInTheDocument()
+  })
+
+  // Test 4: a failed save shows the server's message and keeps the form open.
+  test('shows the server\'s message when the request fails (e.g. 409) and stays on the page', async () => {
+    // Create a fresh pretend user for this test.
+    const user = userEvent.setup()
+    // Make the fake POST request fail instead of succeeding.
+    api.post.mockRejectedValue({
+      // Match the error structure the form reads: response.data.message.
+      response: { data: { message: 'Duplicate item at this location' } }
+    })
+    // Display a fresh Report Item form.
+    renderAt('/items/new')
+
+    // Enter an item title, as a real user would.
+    await user.type(screen.getByPlaceholderText(/title/i), 'Black backpack')
+    // Enter the location of the item.
+    await user.type(screen.getByPlaceholderText(/location/i), 'Library')
+    // Submit the form, triggering the fake failed request.
+    await user.click(screen.getByRole('button', { name: /save/i }))
+
+    // Wait for the exact server error to appear on the page.
+    expect(await screen.findByText('Duplicate item at this location')).toBeInTheDocument()
+    // Confirm that the form actually attempted one POST request.
+    expect(api.post).toHaveBeenCalledTimes(1)
+    // Confirm the Report Item heading is still visible after the error.
+    expect(screen.getByRole('heading', { name: /report item/i })).toBeInTheDocument()
+    // Confirm the user's title was preserved rather than cleared.
+    expect(screen.getByPlaceholderText(/title/i)).toHaveValue('Black backpack')
+    // queryByText returns null when text is absent, so we can check that
+    // the destination page is NOT displayed: the user stayed on the form.
+    expect(screen.queryByText('Items page')).not.toBeInTheDocument()
+  })
 })
